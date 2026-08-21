@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ops Log — Trading Systems Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#12181B;
+    --bg-panel:#1A2226;
+    --bg-card:#1F2A2E;
+    --bg-card-hover:#243036;
+    --line:#2C3A3F;
+    --line-soft:#233034;
+    --ink:#EDEAE0;
+    --ink-dim:#9AA8AB;
+    --ink-faint:#647074;
+    --amber:#E8A33D;
+    --amber-dim:#8A6626;
+    --teal:#4FD1A5;
+    --teal-dim:#2C6650;
+    --coral:#E8664A;
+    --coral-dim:#7A3628;
+    --violet:#9C8CE0;
+    --violet-dim:#4F4680;
+    --radius:3px;
+    --font-display:'Space Grotesk', sans-serif;
+    --font-mono:'IBM Plex Mono', monospace;
+    --font-body:'Inter', sans-serif;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--font-body);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* subtle grid texture */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image:
+      linear-gradient(var(--line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size:64px 64px;
+    opacity:0.25;
+    pointer-events:none;
+    z-index:0;
+  }
+
+  a{color:inherit;}
+
+  /* ---------- HEADER ---------- */
+  header{
+    position:relative; z-index:1;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, #151D20 0%, var(--bg) 100%);
+  }
+  .header-top{
+    max-width:1400px; margin:0 auto;
+    padding:28px 32px 20px;
+    display:flex; justify-content:space-between; align-items:flex-end; gap:24px;
+    flex-wrap:wrap;
+  }
+  .brand-eyebrow{
+    font-family:var(--font-mono);
+    font-size:11px; letter-spacing:0.18em; text-transform:uppercase;
+    color:var(--amber); margin:0 0 8px;
+  }
+  .brand-title{
+    font-family:var(--font-display);
+    font-weight:700; font-size:32px; letter-spacing:-0.01em;
+    margin:0; color:var(--ink);
+  }
+  .brand-sub{
+    font-family:var(--font-body); font-size:13.5px; color:var(--ink-dim);
+    margin:6px 0 0; max-width:520px; line-height:1.5;
+  }
+  .header-actions{display:flex; gap:10px; flex-wrap:wrap;}
+
+  .btn{
+    font-family:var(--font-mono); font-size:12px; letter-spacing:0.03em;
+    padding:10px 16px; border-radius:var(--radius); border:1px solid var(--line);
+    background:var(--bg-panel); color:var(--ink);
+    cursor:pointer; transition:border-color .15s, background .15s, transform .1s;
+    white-space:nowrap;
+  }
+  .btn:hover{border-color:var(--amber-dim); background:var(--bg-card-hover);}
+  .btn:active{transform:translateY(1px);}
+  .btn-primary{background:var(--amber); color:#1A1204; border-color:var(--amber); font-weight:600;}
+  .btn-primary:hover{background:#F0AF4E; border-color:#F0AF4E;}
+  .btn-ghost{background:transparent;}
+  .btn-sm{padding:6px 10px; font-size:11px;}
+
+  /* ---------- TICKER ---------- */
+  .ticker-wrap{
+    overflow:hidden; border-top:1px solid var(--line); background:#0F1416;
+    white-space:nowrap; position:relative;
+  }
+  .ticker-wrap::before, .ticker-wrap::after{
+    content:""; position:absolute; top:0; bottom:0; width:60px; z-index:2; pointer-events:none;
+  }
+  .ticker-wrap::before{ left:0; background:linear-gradient(90deg, #0F1416, transparent); }
+  .ticker-wrap::after{ right:0; background:linear-gradient(270deg, #0F1416, transparent); }
+  .ticker-track{
+    display:inline-flex; align-items:center; gap:0;
+    animation:scroll-ticker 38s linear infinite;
+    padding:9px 0;
+  }
+  .ticker-wrap:hover .ticker-track{animation-play-state:paused;}
+  @keyframes scroll-ticker{
+    from{transform:translateX(0);}
+    to{transform:translateX(-50%);}
+  }
+  .ticker-item{
+    font-family:var(--font-mono); font-size:12px; color:var(--ink-dim);
+    display:inline-flex; align-items:center; gap:8px;
+    padding:0 22px; border-right:1px solid var(--line);
+  }
+  .ticker-item .dot{width:6px;height:6px;border-radius:50%;display:inline-block;}
+  .ticker-item b{color:var(--ink); font-weight:600;}
+  .up{color:var(--teal);}
+  .down{color:var(--coral);}
+
+  /* ---------- TOOLBAR ---------- */
+  .toolbar{
+    max-width:1400px; margin:0 auto; padding:22px 32px 0;
+    position:relative; z-index:1;
+    display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;
+  }
+  .filters{display:flex; gap:8px; flex-wrap:wrap;}
+  .chip{
+    font-family:var(--font-mono); font-size:11.5px; letter-spacing:0.02em;
+    padding:7px 13px; border-radius:20px; border:1px solid var(--line);
+    background:var(--bg-panel); color:var(--ink-dim); cursor:pointer;
+    display:inline-flex; align-items:center; gap:7px;
+    transition:all .15s;
+  }
+  .chip .sw{width:7px;height:7px;border-radius:50%;}
+  .chip.active{color:var(--ink); border-color:currentColor; background:var(--bg-card-hover);}
+  .search-box{
+    font-family:var(--font-mono); font-size:12.5px;
+    background:var(--bg-panel); border:1px solid var(--line); color:var(--ink);
+    padding:9px 12px; border-radius:var(--radius); width:220px;
+    outline:none; transition:border-color .15s;
+  }
+  .search-box:focus{border-color:var(--amber-dim);}
+  .search-box::placeholder{color:var(--ink-faint);}
+
+  /* ---------- BOARD ---------- */
+  main{max-width:1400px; margin:0 auto; padding:24px 32px 60px; position:relative; z-index:1;}
+  .board{
+    display:grid;
+    grid-template-columns:repeat(4, minmax(0,1fr));
+    gap:16px;
+  }
+  .column{
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:6px;
+    min-height:200px;
+    display:flex; flex-direction:column;
+    transition:background .15s, border-color .15s;
+  }
+  .column.drag-over{border-color:var(--amber-dim); background:#1E2528;}
+  .column-head{
+    padding:14px 16px 12px;
+    border-bottom:1px solid var(--line);
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .column-head h2{
+    font-family:var(--font-mono); font-size:12px; letter-spacing:0.09em;
+    text-transform:uppercase; margin:0; color:var(--ink-dim); font-weight:500;
+  }
+  .column-count{
+    font-family:var(--font-mono); font-size:11px; color:var(--ink-faint);
+    background:var(--bg); border:1px solid var(--line); border-radius:10px;
+    padding:1px 8px;
+  }
+  .card-list{
+    flex:1; padding:12px; display:flex; flex-direction:column; gap:10px;
+    min-height:80px;
+  }
+  .empty-slot{
+    font-family:var(--font-mono); font-size:11px; color:var(--ink-faint);
+    text-align:center; padding:18px 8px; border:1px dashed var(--line);
+    border-radius:var(--radius);
+  }
+
+  .card{
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-left:3px solid var(--amber);
+    border-radius:var(--radius);
+    padding:12px 13px 11px;
+    cursor:grab;
+    transition:background .15s, transform .1s, box-shadow .15s;
+  }
+  .card:hover{background:var(--bg-card-hover); box-shadow:0 2px 10px rgba(0,0,0,0.25);}
+  .card.dragging{opacity:0.4;}
+  .card[data-category="scan"]{border-left-color:var(--amber);}
+  .card[data-category="tool"]{border-left-color:var(--teal);}
+  .card[data-category="collab"]{border-left-color:var(--violet);}
+
+  .card-top{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;}
+  .card-title{
+    font-family:var(--font-body); font-weight:500; font-size:13.5px;
+    line-height:1.35; margin:0; color:var(--ink);
+  }
+  .card-cat-label{
+    font-family:var(--font-mono); font-size:9.5px; letter-spacing:0.06em; text-transform:uppercase;
+    margin:0 0 5px; display:block;
+  }
+  .card[data-category="scan"] .card-cat-label{color:var(--amber);}
+  .card[data-category="tool"] .card-cat-label{color:var(--teal);}
+  .card[data-category="collab"] .card-cat-label{color:var(--violet);}
+
+  .card-notes{
+    font-size:12px; color:var(--ink-dim); line-height:1.5; margin:7px 0 0;
+    white-space:pre-wrap;
+  }
+  .card-meta{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-top:10px; padding-top:8px; border-top:1px solid var(--line-soft);
+  }
+  .priority{
+    font-family:var(--font-mono); font-size:10px; letter-spacing:0.04em; text-transform:uppercase;
+    padding:2px 7px; border-radius:9px; border:1px solid;
+  }
+  .priority.high{color:var(--coral); border-color:var(--coral-dim); background:rgba(232,102,74,0.08);}
+  .priority.med{color:var(--amber); border-color:var(--amber-dim); background:rgba(232,163,61,0.08);}
+  .priority.low{color:var(--ink-faint); border-color:var(--line); background:transparent;}
+  .card-actions{display:flex; gap:4px;}
+  .icon-btn{
+    background:none; border:none; color:var(--ink-faint); cursor:pointer;
+    font-size:13px; padding:2px 5px; border-radius:3px; line-height:1;
+    transition:color .12s, background .12s;
+  }
+  .icon-btn:hover{color:var(--ink); background:var(--line-soft);}
+
+  /* ---------- MODAL ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(9,12,13,0.72);
+    display:none; align-items:center; justify-content:center; z-index:50; padding:20px;
+  }
+  .modal-overlay.open{display:flex;}
+  .modal{
+    background:var(--bg-panel); border:1px solid var(--line); border-radius:6px;
+    width:100%; max-width:460px; padding:22px; max-height:90vh; overflow-y:auto;
+  }
+  .modal h3{
+    font-family:var(--font-display); font-size:17px; margin:0 0 16px; color:var(--ink);
+  }
+  .field{margin-bottom:14px;}
+  .field label{
+    display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:0.06em;
+    text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;
+  }
+  .field input[type="text"], .field textarea, .field select{
+    width:100%; background:var(--bg); border:1px solid var(--line); color:var(--ink);
+    padding:9px 10px; border-radius:var(--radius); font-family:var(--font-body); font-size:13px;
+    outline:none; transition:border-color .15s;
+  }
+  .field input:focus, .field textarea:focus, .field select:focus{border-color:var(--amber-dim);}
+  .field textarea{min-height:70px; resize:vertical; font-family:var(--font-body);}
+  .field-row{display:flex; gap:10px;}
+  .field-row .field{flex:1;}
+  .modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:18px;}
+
+  .radio-row{display:flex; gap:8px; flex-wrap:wrap;}
+  .radio-pill{
+    font-family:var(--font-mono); font-size:11px; padding:7px 12px; border-radius:20px;
+    border:1px solid var(--line); cursor:pointer; color:var(--ink-dim);
+  }
+  .radio-pill.selected{color:var(--ink); border-color:var(--amber); background:rgba(232,163,61,0.1);}
+
+  footer{
+    max-width:1400px; margin:0 auto; padding:0 32px 40px;
+    font-family:var(--font-mono); font-size:11px; color:var(--ink-faint);
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+    position:relative; z-index:1;
+  }
+
+  @media (max-width:1100px){
+    .board{grid-template-columns:repeat(2, minmax(0,1fr));}
+  }
+  @media (max-width:640px){
+    .board{grid-template-columns:1fr;}
+    .header-top{padding:22px 18px 16px;}
+    .toolbar, main, footer{padding-left:18px; padding-right:18px;}
+    .brand-title{font-size:24px;}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .ticker-track{animation:none;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div>
+      <p class="brand-eyebrow">Ops Log · Active Trader Pro</p>
+      <h1 class="brand-title">Systems Desk</h1>
+      <p class="brand-sub">Track scan refinements, mechanical tool upgrades, and open questions for collaboration — in one working board.</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="exportBtn">Export JSON</button>
+      <button class="btn" id="importBtn">Import JSON</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+      <button class="btn btn-primary" id="newItemBtn">+ New Item</button>
+    </div>
+  </div>
+  <div class="ticker-wrap">
+    <div class="ticker-track" id="tickerTrack"></div>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="filters" id="filterChips">
+    <button class="chip active" data-filter="all">All items</button>
+    <button class="chip" data-filter="scan"><span class="sw" style="background:var(--amber)"></span>Scan refinement</button>
+    <button class="chip" data-filter="tool"><span class="sw" style="background:var(--teal)"></span>Tool optimization</button>
+    <button class="chip" data-filter="collab"><span class="sw" style="background:var(--violet)"></span>Collaboration</button>
+  </div>
+  <input type="text" class="search-box" id="searchBox" placeholder="Search items…">
+</div>
+
+<main>
+  <div class="board" id="board">
+    <div class="column" data-status="backlog">
+      <div class="column-head"><h2>Backlog</h2><span class="column-count" id="count-backlog">0</span></div>
+      <div class="card-list" data-status="backlog" id="list-backlog"></div>
+    </div>
+    <div class="column" data-status="progress">
+      <div class="column-head"><h2>In Progress</h2><span class="column-count" id="count-progress">0</span></div>
+      <div class="card-list" data-status="progress" id="list-progress"></div>
+    </div>
+    <div class="column" data-status="testing">
+      <div class="column-head"><h2>Testing / Review</h2><span class="column-count" id="count-testing">0</span></div>
+      <div class="card-list" data-status="testing" id="list-testing"></div>
+    </div>
+    <div class="column" data-status="done">
+      <div class="column-head"><h2>Resolved</h2><span class="column-count" id="count-done">0</span></div>
+      <div class="card-list" data-status="done" id="list-done"></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>Drag cards between columns to update status.</span>
+  <span>Data lives in this browser tab only — use Export to save your board.</span>
+</footer>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h3 id="modalTitle">New item</h3>
+    <input type="hidden" id="editId">
+    <div class="field">
+      <label>Title</label>
+      <input type="text" id="fieldTitle" placeholder="e.g. Tighten RSI filter on breakout scan">
+    </div>
+    <div class="field">
+      <label>Notes</label>
+      <textarea id="fieldNotes" placeholder="Details, parameters, symptoms, or the question you want feedback on…"></textarea>
+    </div>
+    <div class="field">
+      <label>Category</label>
+      <div class="radio-row" id="categoryRow">
+        <div class="radio-pill" data-value="scan">Scan refinement</div>
+        <div class="radio-pill" data-value="tool">Tool optimization</div>
+        <div class="radio-pill" data-value="collab">Collaboration</div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Status</label>
+        <select id="fieldStatus">
+          <option value="backlog">Backlog</option>
+          <option value="progress">In Progress</option>
+          <option value="testing">Testing / Review</option>
+          <option value="done">Resolved</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Priority</label>
+        <div class="radio-row" id="priorityRow">
+          <div class="radio-pill" data-value="low">Low</div>
+          <div class="radio-pill" data-value="med">Med</div>
+          <div class="radio-pill" data-value="high">High</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="saveBtn">Save item</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const CATEGORY_LABEL = { scan:"Scan refinement", tool:"Tool optimization", collab:"Collaboration" };
+  const STATUS_LABEL = { backlog:"Backlog", progress:"In Progress", testing:"Testing / Review", done:"Resolved" };
+  const STATUSES = ["backlog","progress","testing","done"];
+
+  let items = [
+    { id: cryptoId(), title:"Add ATR-based volatility floor to gap scan", notes:"Current gap-up scan pulls in low-liquidity noise. Test a minimum ATR(14) threshold before it hits the watchlist.", category:"scan", status:"progress", priority:"high", created:Date.now()-86400000*2 },
+    { id: cryptoId(), title:"Rebuild position-sizing calculator as a hotkeyed tool", notes:"Manual sizing is slowing entries. Wire risk % and stop distance into a one-click size output.", category:"tool", status:"backlog", priority:"med", created:Date.now()-86400000*5 },
+    { id: cryptoId(), title:"Sanity-check exit logic on trend continuation system", notes:"Want a second pair of eyes on whether the trailing-stop step is exiting too early on strong trend days.", category:"collab", status:"testing", priority:"med", created:Date.now()-86400000*1 },
+    { id: cryptoId(), title:"Split custom scan into pre-market and RTH variants", notes:"Same filter set behaves differently on thin pre-market volume — needs separate thresholds.", category:"scan", status:"backlog", priority:"low", created:Date.now()-86400000*3 },
+    { id: cryptoId(), title:"Automate daily scan-result export to journal sheet", notes:"", category:"tool", status:"done", priority:"low", created:Date.now()-86400000*9 }
+  ];
+
+  let activeFilter = "all";
+  let searchTerm = "";
+  let editState = { category:"scan", priority:"med" };
+  let draggedId = null;
+
+  function cryptoId(){
+    return 'id-' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  }
+
+  // ---------- RENDER ----------
+  function render(){
+    STATUSES.forEach(status=>{
+      const list = document.getElementById('list-'+status);
+      list.innerHTML = "";
+      const filtered = items.filter(it =>
+        it.status === status &&
+        (activeFilter === "all" || it.category === activeFilter) &&
+        matchesSearch(it)
+      );
+      document.getElementById('count-'+status).textContent = filtered.length;
+
+      if(filtered.length === 0){
+        const empty = document.createElement('div');
+        empty.className = 'empty-slot';
+        empty.textContent = '— no items —';
+        list.appendChild(empty);
+        return;
+      }
+
+      filtered.sort((a,b)=> b.created - a.created).forEach(it=>{
+        list.appendChild(renderCard(it));
+      });
+    });
+    renderTicker();
+  }
+
+  function matchesSearch(it){
+    if(!searchTerm) return true;
+    const hay = (it.title + " " + it.notes).toLowerCase();
+    return hay.includes(searchTerm.toLowerCase());
+  }
+
+  function renderCard(it){
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.draggable = true;
+    card.dataset.id = it.id;
+    card.dataset.category = it.category;
+
+    card.innerHTML = `
+      <span class="card-cat-label">${CATEGORY_LABEL[it.category]}</span>
+      <div class="card-top">
+        <p class="card-title"></p>
+      </div>
+      ${it.notes ? `<p class="card-notes"></p>` : ``}
+      <div class="card-meta">
+        <span class="priority ${it.priority}">${it.priority}</span>
+        <div class="card-actions">
+          <button class="icon-btn" data-action="edit" title="Edit">✎</button>
+          <button class="icon-btn" data-action="delete" title="Delete">✕</button>
+        </div>
+      </div>
+    `;
+    card.querySelector('.card-title').textContent = it.title;
+    if(it.notes) card.querySelector('.card-notes').textContent = it.notes;
+
+    card.addEventListener('dragstart', ()=>{
+      draggedId = it.id;
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', ()=> card.classList.remove('dragging'));
+
+    card.querySelector('[data-action="edit"]').addEventListener('click', (e)=>{
+      e.stopPropagation();
+      openModal(it);
+    });
+    card.querySelector('[data-action="delete"]').addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(confirm('Delete "'+it.title+'"?')){
+        items = items.filter(x=>x.id!==it.id);
+        render();
+      }
+    });
+
+    return card;
+  }
+
+  function renderTicker(){
+    const track = document.getElementById('tickerTrack');
+    const counts = { backlog:0, progress:0, testing:0, done:0 };
+    const catCounts = { scan:0, tool:0, collab:0 };
+    items.forEach(it=>{ counts[it.status]++; catCounts[it.category]++; });
+
+    const segments = [
+      seg('BACKLOG', counts.backlog, 'up'),
+      seg('IN PROGRESS', counts.progress, 'up'),
+      seg('TESTING', counts.testing, 'up'),
+      seg('RESOLVED', counts.done, 'down'),
+      seg('SCAN REFINEMENT', catCounts.scan, 'up', 'var(--amber)'),
+      seg('TOOL OPTIMIZATION', catCounts.tool, 'up', 'var(--teal)'),
+      seg('COLLABORATION', catCounts.collab, 'up', 'var(--violet)'),
+    ];
+    const html = segments.map(s=>s).join('');
+    track.innerHTML = html + html; // duplicate for seamless loop
+  }
+
+  function seg(label, count, dir, color){
+    const dotColor = color || (dir==='up' ? 'var(--teal)' : 'var(--coral)');
+    return `<span class="ticker-item"><span class="dot" style="background:${dotColor}"></span>${label} <b>${count}</b></span>`;
+  }
+
+  // ---------- FILTERS / SEARCH ----------
+  document.getElementById('filterChips').addEventListener('click', (e)=>{
+    const chip = e.target.closest('.chip');
+    if(!chip) return;
+    document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    activeFilter = chip.dataset.filter;
+    render();
+  });
+
+  document.getElementById('searchBox').addEventListener('input', (e)=>{
+    searchTerm = e.target.value;
+    render();
+  });
+
+  // ---------- DRAG & DROP ----------
+  document.querySelectorAll('.card-list').forEach(list=>{
+    list.addEventListener('dragover', (e)=>{
+      e.preventDefault();
+      list.closest('.column').classList.add('drag-over');
+    });
+    list.addEventListener('dragleave', ()=>{
+      list.closest('.column').classList.remove('drag-over');
+    });
+    list.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      list.closest('.column').classList.remove('drag-over');
+      const it = items.find(x=>x.id===draggedId);
+      if(it){
+        it.status = list.dataset.status;
+        render();
+      }
+    });
+  });
+
+  // ---------- MODAL ----------
+  const overlay = document.getElementById('modalOverlay');
+  const modalTitle = document.getElementById('modalTitle');
+  const fieldTitle = document.getElementById('fieldTitle');
+  const fieldNotes = document.getElementById('fieldNotes');
+  const fieldStatus = document.getElementById('fieldStatus');
+  const editId = document.getElementById('editId');
+
+  function openModal(item){
+    editId.value = item ? item.id : "";
+    modalTitle.textContent = item ? "Edit item" : "New item";
+    fieldTitle.value = item ? item.title : "";
+    fieldNotes.value = item ? item.notes : "";
+    fieldStatus.value = item ? item.status : "backlog";
+    editState.category = item ? item.category : "scan";
+    editState.priority = item ? item.priority : "med";
+    syncPills('categoryRow', editState.category);
+    syncPills('priorityRow', editState.priority);
+    overlay.classList.add('open');
+    fieldTitle.focus();
+  }
+
+  function closeModal(){
+    overlay.classList.remove('open');
+  }
+
+  function syncPills(rowId, value){
+    document.querySelectorAll('#'+rowId+' .radio-pill').forEach(p=>{
+      p.classList.toggle('selected', p.dataset.value === value);
+    });
+  }
+
+  document.getElementById('categoryRow').addEventListener('click', (e)=>{
+    const pill = e.target.closest('.radio-pill');
+    if(!pill) return;
+    editState.category = pill.dataset.value;
+    syncPills('categoryRow', editState.category);
+  });
+  document.getElementById('priorityRow').addEventListener('click', (e)=>{
+    const pill = e.target.closest('.radio-pill');
+    if(!pill) return;
+    editState.priority = pill.dataset.value;
+    syncPills('priorityRow', editState.priority);
+  });
+
+  document.getElementById('newItemBtn').addEventListener('click', ()=> openModal(null));
+  document.getElementById('cancelBtn').addEventListener('click', closeModal);
+  overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closeModal(); });
+
+  document.getElementById('saveBtn').addEventListener('click', ()=>{
+    const title = fieldTitle.value.trim();
+    if(!title){ fieldTitle.focus(); return; }
+    const id = editId.value;
+
+    if(id){
+      const it = items.find(x=>x.id===id);
+      it.title = title;
+      it.notes = fieldNotes.value.trim();
+      it.status = fieldStatus.value;
+      it.category = editState.category;
+      it.priority = editState.priority;
+    } else {
+      items.push({
+        id: cryptoId(),
+        title,
+        notes: fieldNotes.value.trim(),
+        status: fieldStatus.value,
+        category: editState.category,
+        priority: editState.priority,
+        created: Date.now()
+      });
+    }
+    closeModal();
+    render();
+  });
+
+  // ---------- EXPORT / IMPORT ----------
+  document.getElementById('exportBtn').addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify(items, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'systems-desk-board.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('importBtn').addEventListener('click', ()=>{
+    document.getElementById('importFile').click();
+  });
+  document.getElementById('importFile').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt)=>{
+      try{
+        const parsed = JSON.parse(evt.target.result);
+        if(Array.isArray(parsed)){
+          items = parsed;
+          render();
+        } else {
+          alert('That file does not look like a valid board export.');
+        }
+      }catch(err){
+        alert('Could not read that file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
