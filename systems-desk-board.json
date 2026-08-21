@@ -1,0 +1,47 @@
+[
+  {
+    "id": "id-v4ntt07jmt38l0yi",
+    "title": "Add ATR-based volatility floor to gap scan",
+    "notes": "Current gap-up scan pulls in low-liquidity noise. Test a minimum ATR(14) threshold before it hits the watchlist.",
+    "category": "scan",
+    "status": "progress",
+    "priority": "high",
+    "created": 1787161314330
+  },
+  {
+    "id": "id-27znsacomt38l0yi",
+    "title": "Rebuild position-sizing calculator as a hotkeyed tool",
+    "notes": "Manual sizing is slowing entries. Wire risk % and stop distance into a one-click size output.",
+    "category": "tool",
+    "status": "backlog",
+    "priority": "med",
+    "created": 1786902114330
+  },
+  {
+    "id": "id-ooxpdisvmt38l0yi",
+    "title": "Sanity-check exit logic on trend continuation system",
+    "notes": "Want a second pair of eyes on whether the trailing-stop step is exiting too early on strong trend days.",
+    "category": "collab",
+    "status": "testing",
+    "priority": "med",
+    "created": 1787247714330
+  },
+  {
+    "id": "id-p22u43ejmt38l0yi",
+    "title": "Split custom scan into pre-market and RTH variants",
+    "notes": "Same filter set behaves differently on thin pre-market volume — needs separate thresholds.",
+    "category": "scan",
+    "status": "backlog",
+    "priority": "low",
+    "created": 1787074914330
+  },
+  {
+    "id": "id-14h247dnmt38l0yi",
+    "title": "Automate daily scan-result export to journal sheet",
+    "notes": "",
+    "category": "tool",
+    "status": "done",
+    "priority": "low",
+    "created": 1786556514330
+  }
+]
