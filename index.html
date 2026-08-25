@@ -315,6 +315,8 @@
       <button class="btn" id="exportBtn">Export JSON</button>
       <button class="btn" id="importBtn">Import JSON</button>
       <input type="file" id="jsonFileInput" accept="application/json" hidden>
+      <button class="btn" id="sendToBigQueryBtn">Send to BigQuery</button>
+      <button class="btn" id="loadFromBigQueryBtn">Load from BigQuery</button>
       <button class="btn btn-primary" id="newItemBtn">+ New Item</button>
     </div>
   </div>
@@ -413,6 +415,8 @@
   const CATEGORY_LABEL = { scan:"Scan refinement", tool:"Tool optimization", collab:"Collaboration" };
   const STATUS_LABEL = { backlog:"Backlog", progress:"In Progress", testing:"Testing / Review", done:"Resolved" };
   const STATUSES = ["backlog","progress","testing","done"];
+  const CATEGORIES = ["scan","tool","collab"];
+  const PRIORITIES = ["low","med","high"];
 
   let items = [
     { id: cryptoId(), title:"Add ATR-based volatility floor to gap scan", notes:"Current gap-up scan pulls in low-liquidity noise. Test a minimum ATR(14) threshold before it hits the watchlist.", category:"scan", status:"progress", priority:"high", created:Date.now()-86400000*2 },
@@ -645,6 +649,68 @@
   });
 
   // ---------- EXPORT / IMPORT ----------
+  const importNotesUrl = 'https://us-central1-ops-board-506600.cloudfunctions.net/importNotes';
+  const exportNotesUrl = 'https://us-central1-ops-board-506600.cloudfunctions.net/exportNotes';
+
+  function normalizeRemoteItem(item){
+    const status = String(item.status || '').toLowerCase().replace(/[^a-z]+/g, '');
+    const category = String(item.category || '').toLowerCase();
+    const priority = String(item.priority || '').toLowerCase();
+    return {
+      id: item.id || cryptoId(),
+      title: item.title || '',
+      notes: item.notes ?? item.content ?? '',
+      status: STATUSES.includes(status) ? status : 'backlog',
+      category: CATEGORIES.includes(category) ? category : 'collab',
+      priority: PRIORITIES.includes(priority) ? priority : 'med',
+      created: item.created || item.created_at ? new Date(item.created || item.created_at).getTime() : Date.now()
+    };
+  }
+
+  async function sendJsonToBigQuery(){
+    const response = await fetch(importNotesUrl, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(items.map(item=>({
+        id: item.id,
+        title: item.title,
+        content: item.notes,
+        category: item.category,
+        status: item.status,
+        created_at: new Date(item.created).toISOString()
+      })))
+    });
+    if(!response.ok) throw new Error(`Upload failed (${response.status})`);
+  }
+
+  async function loadNotesFromBigQuery(){
+    const response = await fetch(exportNotesUrl);
+    if(!response.ok) throw new Error(`Load failed (${response.status})`);
+    const payload = await response.json();
+    const remoteItems = Array.isArray(payload) ? payload : payload.notes;
+    if(!Array.isArray(remoteItems)) throw new Error('The response is not a notes array.');
+    items = remoteItems.map(normalizeRemoteItem);
+    render();
+  }
+
+  document.getElementById('sendToBigQueryBtn').addEventListener('click', async ()=>{
+    try{
+      await sendJsonToBigQuery();
+      alert('Board sent to BigQuery.');
+    }catch(err){
+      alert('Could not send the board to BigQuery: ' + err.message);
+    }
+  });
+
+  document.getElementById('loadFromBigQueryBtn').addEventListener('click', async ()=>{
+    try{
+      await loadNotesFromBigQuery();
+      alert('Notes loaded from BigQuery.');
+    }catch(err){
+      alert('Could not load notes from BigQuery: ' + err.message);
+    }
+  });
+
   document.getElementById('exportBtn').addEventListener('click', ()=>{
     const blob = new Blob([JSON.stringify(items, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
