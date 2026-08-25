@@ -314,7 +314,7 @@
     <div class="header-actions">
       <button class="btn" id="exportBtn">Export JSON</button>
       <button class="btn" id="importBtn">Import JSON</button>
-      <input type="file" id="importFile" accept="application/json" hidden>
+      <input type="file" id="jsonFileInput" accept="application/json" hidden>
       <button class="btn btn-primary" id="newItemBtn">+ New Item</button>
     </div>
   </div>
@@ -658,9 +658,9 @@
   });
 
   document.getElementById('importBtn').addEventListener('click', ()=>{
-    document.getElementById('importFile').click();
+    document.getElementById('jsonFileInput').click();
   });
-  document.getElementById('importFile').addEventListener('change', (e)=>{
+  document.getElementById('jsonFileInput').addEventListener('change', (e)=>{
     const file = e.target.files[0];
     if(!file) return;
     const reader = new FileReader();
