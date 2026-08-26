@@ -414,6 +414,26 @@
 (function(){
   "use strict";
 
+  // Check if Google redirected back with an access token right away
+  const hash = window.location.hash.substring(1);
+  const params = new URLSearchParams(hash);
+  const accessToken = params.get('access_token');
+
+  if (accessToken) {
+    fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    })
+    .then(res => res.json())
+    .then(user => {
+      if (user.email) {
+        localStorage.setItem('user_email', user.email);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        alert(`Successfully signed in as ${user.email}`);
+      }
+    })
+    .catch(err => console.error('Failed to fetch user info', err));
+  }
+
   const CATEGORY_LABEL = { scan:"Scan refinement", tool:"Tool optimization", collab:"Collaboration" };
   const STATUS_LABEL = { backlog:"Backlog", progress:"In Progress", testing:"Testing / Review", done:"Resolved" };
   const STATUSES = ["backlog","progress","testing","done"];
@@ -670,9 +690,18 @@
   }
 
   async function sendJsonToBigQuery(){
+    const userEmail = localStorage.getItem('user_email');
+    if(!userEmail){
+      alert('Please sign in with Google before syncing to BigQuery.');
+      return;
+    }
+
     const response = await fetch(importNotesUrl, {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Email': userEmail
+      },
       body: JSON.stringify(items.map(item=>({
         id: item.id,
         title: item.title,
@@ -686,7 +715,17 @@
   }
 
   async function loadNotesFromBigQuery(){
-    const response = await fetch(exportNotesUrl);
+    const userEmail = localStorage.getItem('user_email');
+    if(!userEmail){
+      alert('Please sign in with Google before loading notes.');
+      return;
+    }
+
+    const response = await fetch(`${exportNotesUrl}?email=${encodeURIComponent(userEmail)}`, {
+      headers: {
+        'X-User-Email': userEmail
+      }
+    });
     if(!response.ok) throw new Error(`Load failed (${response.status})`);
     const payload = await response.json();
     const remoteItems = Array.isArray(payload) ? payload : payload.notes;
