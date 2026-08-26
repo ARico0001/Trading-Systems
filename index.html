@@ -6,6 +6,7 @@
 <title>Ops Log — Trading Systems Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --bg:#12181B;
@@ -312,6 +313,7 @@
       <p class="brand-sub">Track scan refinements, mechanical tool upgrades, and open questions for collaboration — in one working board.</p>
     </div>
     <div class="header-actions">
+      <button class="btn" id="loginBtn">Sign in with Google</button>
       <button class="btn" id="exportBtn">Export JSON</button>
       <button class="btn" id="importBtn">Import JSON</button>
       <input type="file" id="jsonFileInput" accept="application/json" hidden>
@@ -711,6 +713,26 @@
     }
   });
 
+  // ---------- GOOGLE LOGIN REDIRECT ----------
+  document.getElementById('loginBtn').addEventListener('click', () => {
+    const oauth2Endpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
+    
+    const params = {
+      client_id: '743665673546-dei6iesm01lgghu3qeorji0aqeos4083.apps.googleusercontent.com',
+      redirect_uri: window.location.origin,
+      response_type: 'token',
+      scope: 'openid email profile',
+      include_granted_scopes: 'true',
+      state: 'security_token_verification'
+    };
+
+    const queryString = Object.keys(params)
+      .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key]))
+      .join('&');
+
+    window.location.href = `${oauth2Endpoint}?${queryString}`;
+  });
+
   document.getElementById('exportBtn').addEventListener('click', ()=>{
     const blob = new Blob([JSON.stringify(items, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
@@ -750,6 +772,5 @@
   render();
 })();
 </script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 </body>
 </html>
