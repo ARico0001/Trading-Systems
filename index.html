@@ -360,7 +360,7 @@
 
 <footer>
   <span>Drag cards between columns to update status.</span>
-  <span>Data lives in this browser tab only — use Export to save your board.</span>
+  <span id="userSessionStatus">Data lives in this browser tab only — use Export to save your board.</span>
 </footer>
 
 <!-- Modal -->
@@ -414,24 +414,63 @@
 (function(){
   "use strict";
 
-  // Check if Google redirected back with an access token right away
+  // Security: Generate CSRF state token if not already in sessionStorage
+  if (!sessionStorage.getItem('oauth_state')) {
+    const array = new Uint8Array(16);
+    window.crypto.getRandomValues(array);
+    const token = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    sessionStorage.setItem('oauth_state', token);
+  }
+
+  // Handle Google OAuth callback via hash fragment
   const hash = window.location.hash.substring(1);
   const params = new URLSearchParams(hash);
   const accessToken = params.get('access_token');
+  const returnedState = params.get('state');
 
   if (accessToken) {
-    fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { 'Authorization': `Bearer ${accessToken}` }
-    })
-    .then(res => res.json())
-    .then(user => {
-      if (user.email) {
-        localStorage.setItem('user_email', user.email);
-        window.history.replaceState({}, document.title, window.location.pathname);
-        alert(`Successfully signed in as ${user.email}`);
+    const savedState = sessionStorage.getItem('oauth_state');
+    if (returnedState !== savedState) {
+      console.error('CSRF state validation failed.');
+      alert('Security validation failed: Invalid OAuth state token.');
+    } else {
+      fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      })
+      .then(res => res.json())
+      .then(user => {
+        if (user.email) {
+          sessionStorage.setItem('user_email', user.email);
+          window.history.replaceState({}, document.title, window.location.pathname);
+          updateSessionUI();
+          alert(`Successfully signed in as ${safeString(user.email)}`);
+        }
+      })
+      .catch(err => console.error('Failed to fetch user info', err));
+    }
+  }
+
+  // UI state update for sign in status
+  function updateSessionUI() {
+    const userEmail = sessionStorage.getItem('user_email');
+    const loginBtn = document.getElementById('loginBtn');
+    const statusFooter = document.getElementById('userSessionStatus');
+    if (loginBtn) {
+      if (userEmail) {
+        loginBtn.textContent = 'Signed in (' + userEmail.split('@')[0] + ')';
+        loginBtn.title = userEmail;
+      } else {
+        loginBtn.textContent = 'Sign in with Google';
+        loginBtn.title = '';
       }
-    })
-    .catch(err => console.error('Failed to fetch user info', err));
+    }
+    if (statusFooter) {
+      if (userEmail) {
+        statusFooter.textContent = 'Signed in as ' + userEmail + ' — Sync active with BigQuery.';
+      } else {
+        statusFooter.textContent = 'Data lives in this browser session only — use Export to save your board.';
+      }
+    }
   }
 
   const CATEGORY_LABEL = { scan:"Scan refinement", tool:"Tool optimization", collab:"Collaboration" };
@@ -457,17 +496,44 @@
     return 'id-' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
   }
 
+  function safeString(str) {
+    if (typeof str !== 'string') return '';
+    return str.replace(/[&<>'"]/g, 
+      tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+    );
+  }
+
+  function sanitizeItem(item) {
+    if (!item || typeof item !== 'object') return null;
+    return {
+      id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : cryptoId(),
+      title: typeof item.title === 'string' ? item.title.trim() : '',
+      notes: typeof item.notes === 'string' ? item.notes.trim() : (typeof item.content === 'string' ? item.content.trim() : ''),
+      category: CATEGORIES.includes(item.category) ? item.category : 'collab',
+      status: STATUSES.includes(item.status) ? item.status : 'backlog',
+      priority: PRIORITIES.includes(item.priority) ? item.priority : 'med',
+      created: typeof item.created === 'number' ? item.created : (item.created_at ? new Date(item.created_at).getTime() : Date.now())
+    };
+  }
+
+  function validateImportedItems(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr.map(sanitizeItem).filter(item => item !== null && item.title !== '');
+  }
+
   // ---------- RENDER ----------
   function render(){
     STATUSES.forEach(status=>{
       const list = document.getElementById('list-'+status);
+      if(!list) return;
       list.innerHTML = "";
       const filtered = items.filter(it =>
         it.status === status &&
         (activeFilter === "all" || it.category === activeFilter) &&
         matchesSearch(it)
       );
-      document.getElementById('count-'+status).textContent = filtered.length;
+      const countEl = document.getElementById('count-'+status);
+      if(countEl) countEl.textContent = filtered.length;
 
       if(filtered.length === 0){
         const empty = document.createElement('div');
@@ -498,7 +564,7 @@
     card.dataset.category = it.category;
 
     card.innerHTML = `
-      <span class="card-cat-label">${CATEGORY_LABEL[it.category]}</span>
+      <span class="card-cat-label">${CATEGORY_LABEL[it.category] || 'Custom'}</span>
       <div class="card-top">
         <p class="card-title"></p>
       </div>
@@ -511,8 +577,12 @@
         </div>
       </div>
     `;
-    card.querySelector('.card-title').textContent = it.title;
-    if(it.notes) card.querySelector('.card-notes').textContent = it.notes;
+    const titleEl = card.querySelector('.card-title');
+    if(titleEl) titleEl.textContent = it.title;
+    if(it.notes){
+      const notesEl = card.querySelector('.card-notes');
+      if(notesEl) notesEl.textContent = it.notes;
+    }
 
     card.addEventListener('dragstart', ()=>{
       draggedId = it.id;
@@ -520,26 +590,37 @@
     });
     card.addEventListener('dragend', ()=> card.classList.remove('dragging'));
 
-    card.querySelector('[data-action="edit"]').addEventListener('click', (e)=>{
-      e.stopPropagation();
-      openModal(it);
-    });
-    card.querySelector('[data-action="delete"]').addEventListener('click', (e)=>{
-      e.stopPropagation();
-      if(confirm('Delete "'+it.title+'"?')){
-        items = items.filter(x=>x.id!==it.id);
-        render();
-      }
-    });
+    const editBtn = card.querySelector('[data-action="edit"]');
+    if(editBtn){
+      editBtn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        openModal(it);
+      });
+    }
+
+    const deleteBtn = card.querySelector('[data-action="delete"]');
+    if(deleteBtn){
+      deleteBtn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        if(confirm('Delete "'+it.title+'"?')){
+          items = items.filter(x=>x.id!==it.id);
+          render();
+        }
+      });
+    }
 
     return card;
   }
 
   function renderTicker(){
     const track = document.getElementById('tickerTrack');
+    if(!track) return;
     const counts = { backlog:0, progress:0, testing:0, done:0 };
     const catCounts = { scan:0, tool:0, collab:0 };
-    items.forEach(it=>{ counts[it.status]++; catCounts[it.category]++; });
+    items.forEach(it=>{ 
+      if(counts[it.status] !== undefined) counts[it.status]++; 
+      if(catCounts[it.category] !== undefined) catCounts[it.category]++; 
+    });
 
     const segments = [
       seg('BACKLOG', counts.backlog, 'up'),
@@ -560,32 +641,41 @@
   }
 
   // ---------- FILTERS / SEARCH ----------
-  document.getElementById('filterChips').addEventListener('click', (e)=>{
-    const chip = e.target.closest('.chip');
-    if(!chip) return;
-    document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
-    chip.classList.add('active');
-    activeFilter = chip.dataset.filter;
-    render();
-  });
+  const filterChips = document.getElementById('filterChips');
+  if(filterChips){
+    filterChips.addEventListener('click', (e)=>{
+      const chip = e.target.closest('.chip');
+      if(!chip) return;
+      document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+      chip.classList.add('active');
+      activeFilter = chip.dataset.filter;
+      render();
+    });
+  }
 
-  document.getElementById('searchBox').addEventListener('input', (e)=>{
-    searchTerm = e.target.value;
-    render();
-  });
+  const searchBox = document.getElementById('searchBox');
+  if(searchBox){
+    searchBox.addEventListener('input', (e)=>{
+      searchTerm = e.target.value;
+      render();
+    });
+  }
 
   // ---------- DRAG & DROP ----------
   document.querySelectorAll('.card-list').forEach(list=>{
     list.addEventListener('dragover', (e)=>{
       e.preventDefault();
-      list.closest('.column').classList.add('drag-over');
+      const col = list.closest('.column');
+      if(col) col.classList.add('drag-over');
     });
     list.addEventListener('dragleave', ()=>{
-      list.closest('.column').classList.remove('drag-over');
+      const col = list.closest('.column');
+      if(col) col.classList.remove('drag-over');
     });
     list.addEventListener('drop', (e)=>{
       e.preventDefault();
-      list.closest('.column').classList.remove('drag-over');
+      const col = list.closest('.column');
+      if(col) col.classList.remove('drag-over');
       const it = items.find(x=>x.id===draggedId);
       if(it){
         it.status = list.dataset.status;
@@ -603,21 +693,21 @@
   const editId = document.getElementById('editId');
 
   function openModal(item){
-    editId.value = item ? item.id : "";
-    modalTitle.textContent = item ? "Edit item" : "New item";
-    fieldTitle.value = item ? item.title : "";
-    fieldNotes.value = item ? item.notes : "";
-    fieldStatus.value = item ? item.status : "backlog";
+    if(editId) editId.value = item ? item.id : "";
+    if(modalTitle) modalTitle.textContent = item ? "Edit item" : "New item";
+    if(fieldTitle) fieldTitle.value = item ? item.title : "";
+    if(fieldNotes) fieldNotes.value = item ? item.notes : "";
+    if(fieldStatus) fieldStatus.value = item ? item.status : "backlog";
     editState.category = item ? item.category : "scan";
     editState.priority = item ? item.priority : "med";
     syncPills('categoryRow', editState.category);
     syncPills('priorityRow', editState.priority);
-    overlay.classList.add('open');
-    fieldTitle.focus();
+    if(overlay) overlay.classList.add('open');
+    if(fieldTitle) fieldTitle.focus();
   }
 
   function closeModal(){
-    overlay.classList.remove('open');
+    if(overlay) overlay.classList.remove('open');
   }
 
   function syncPills(rowId, value){
@@ -626,71 +716,79 @@
     });
   }
 
-  document.getElementById('categoryRow').addEventListener('click', (e)=>{
-    const pill = e.target.closest('.radio-pill');
-    if(!pill) return;
-    editState.category = pill.dataset.value;
-    syncPills('categoryRow', editState.category);
-  });
-  document.getElementById('priorityRow').addEventListener('click', (e)=>{
-    const pill = e.target.closest('.radio-pill');
-    if(!pill) return;
-    editState.priority = pill.dataset.value;
-    syncPills('priorityRow', editState.priority);
-  });
+  const categoryRow = document.getElementById('categoryRow');
+  if(categoryRow){
+    categoryRow.addEventListener('click', (e)=>{
+      const pill = e.target.closest('.radio-pill');
+      if(!pill) return;
+      editState.category = pill.dataset.value;
+      syncPills('categoryRow', editState.category);
+    });
+  }
 
-  document.getElementById('newItemBtn').addEventListener('click', ()=> openModal(null));
-  document.getElementById('cancelBtn').addEventListener('click', closeModal);
-  overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closeModal(); });
+  const priorityRow = document.getElementById('priorityRow');
+  if(priorityRow){
+    priorityRow.addEventListener('click', (e)=>{
+      const pill = e.target.closest('.radio-pill');
+      if(!pill) return;
+      editState.priority = pill.dataset.value;
+      syncPills('priorityRow', editState.priority);
+    });
+  }
 
-  document.getElementById('saveBtn').addEventListener('click', ()=>{
-    const title = fieldTitle.value.trim();
-    if(!title){ fieldTitle.focus(); return; }
-    const id = editId.value;
+  const newItemBtn = document.getElementById('newItemBtn');
+  if(newItemBtn) newItemBtn.addEventListener('click', ()=> openModal(null));
 
-    if(id){
-      const it = items.find(x=>x.id===id);
-      it.title = title;
-      it.notes = fieldNotes.value.trim();
-      it.status = fieldStatus.value;
-      it.category = editState.category;
-      it.priority = editState.priority;
-    } else {
-      items.push({
-        id: cryptoId(),
-        title,
-        notes: fieldNotes.value.trim(),
-        status: fieldStatus.value,
-        category: editState.category,
-        priority: editState.priority,
-        created: Date.now()
-      });
-    }
-    closeModal();
-    render();
-  });
+  const cancelBtn = document.getElementById('cancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+  if(overlay){
+    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closeModal(); });
+  }
+
+  const saveBtn = document.getElementById('saveBtn');
+  if(saveBtn){
+    saveBtn.addEventListener('click', ()=>{
+      if(!fieldTitle) return;
+      const title = fieldTitle.value.trim();
+      if(!title){ fieldTitle.focus(); return; }
+      const id = editId ? editId.value : '';
+
+      if(id){
+        const it = items.find(x=>x.id===id);
+        if(it){
+          it.title = title;
+          it.notes = fieldNotes ? fieldNotes.value.trim() : '';
+          it.status = fieldStatus ? fieldStatus.value : 'backlog';
+          it.category = editState.category;
+          it.priority = editState.priority;
+        }
+      } else {
+        items.push({
+          id: cryptoId(),
+          title,
+          notes: fieldNotes ? fieldNotes.value.trim() : '',
+          status: fieldStatus ? fieldStatus.value : 'backlog',
+          category: editState.category,
+          priority: editState.priority,
+          created: Date.now()
+        });
+      }
+      closeModal();
+      render();
+    });
+  }
 
   // ---------- EXPORT / IMPORT ----------
   const importNotesUrl = 'https://us-central1-ops-board-506600.cloudfunctions.net/importNotes';
   const exportNotesUrl = 'https://us-central1-ops-board-506600.cloudfunctions.net/exportNotes';
 
   function normalizeRemoteItem(item){
-    const status = String(item.status || '').toLowerCase().replace(/[^a-z]+/g, '');
-    const category = String(item.category || '').toLowerCase();
-    const priority = String(item.priority || '').toLowerCase();
-    return {
-      id: item.id || cryptoId(),
-      title: item.title || '',
-      notes: item.notes ?? item.content ?? '',
-      status: STATUSES.includes(status) ? status : 'backlog',
-      category: CATEGORIES.includes(category) ? category : 'collab',
-      priority: PRIORITIES.includes(priority) ? priority : 'med',
-      created: item.created || item.created_at ? new Date(item.created || item.created_at).getTime() : Date.now()
-    };
+    return sanitizeItem(item);
   }
 
   async function sendJsonToBigQuery(){
-    const userEmail = localStorage.getItem('user_email');
+    const userEmail = sessionStorage.getItem('user_email');
     if(!userEmail){
       alert('Please sign in with Google before syncing to BigQuery.');
       return;
@@ -715,7 +813,7 @@
   }
 
   async function loadNotesFromBigQuery(){
-    const userEmail = localStorage.getItem('user_email');
+    const userEmail = sessionStorage.getItem('user_email');
     if(!userEmail){
       alert('Please sign in with Google before loading notes.');
       return;
@@ -728,86 +826,102 @@
     });
     if(!response.ok) throw new Error(`Load failed (${response.status})`);
     const payload = await response.json();
-    const remoteItems = Array.isArray(payload) ? payload : payload.notes;
+    const remoteItems = Array.isArray(payload) ? payload : (payload.notes || []);
     if(!Array.isArray(remoteItems)) throw new Error('The response is not a notes array.');
-    items = remoteItems.map(normalizeRemoteItem);
+    items = validateImportedItems(remoteItems);
     render();
   }
 
-  document.getElementById('sendToBigQueryBtn').addEventListener('click', async ()=>{
-    try{
-      await sendJsonToBigQuery();
-      alert('Board sent to BigQuery.');
-    }catch(err){
-      alert('Could not send the board to BigQuery: ' + err.message);
-    }
-  });
+  const sendBtn = document.getElementById('sendToBigQueryBtn');
+  if(sendBtn){
+    sendBtn.addEventListener('click', async ()=>{
+      try{
+        await sendJsonToBigQuery();
+        alert('Board sent to BigQuery.');
+      }catch(err){
+        alert('Could not send the board to BigQuery: ' + err.message);
+      }
+    });
+  }
 
-  document.getElementById('loadFromBigQueryBtn').addEventListener('click', async ()=>{
-    try{
-      await loadNotesFromBigQuery();
-      alert('Notes loaded from BigQuery.');
-    }catch(err){
-      alert('Could not load notes from BigQuery: ' + err.message);
-    }
-  });
+  const loadBtn = document.getElementById('loadFromBigQueryBtn');
+  if(loadBtn){
+    loadBtn.addEventListener('click', async ()=>{
+      try{
+        await loadNotesFromBigQuery();
+        alert('Notes loaded from BigQuery.');
+      }catch(err){
+        alert('Could not load notes from BigQuery: ' + err.message);
+      }
+    });
+  }
 
   // ---------- GOOGLE LOGIN REDIRECT ----------
-  document.getElementById('loginBtn').addEventListener('click', () => {
-    const oauth2Endpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
-    
-    const params = {
-      client_id: '743665673546-dei6iesm01lgghu3qeorji0aqeos4083.apps.googleusercontent.com',
-      redirect_uri: window.location.origin,
-      response_type: 'token',
-      scope: 'openid email profile',
-      include_granted_scopes: 'true',
-      state: 'security_token_verification'
-    };
+  const loginBtn = document.getElementById('loginBtn');
+  if(loginBtn){
+    loginBtn.addEventListener('click', () => {
+      const oauth2Endpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
+      const stateToken = sessionStorage.getItem('oauth_state');
+      
+      const params = {
+        client_id: '743665673546-dei6iesm01lgghu3qeorji0aqeos4083.apps.googleusercontent.com',
+        redirect_uri: window.location.origin,
+        response_type: 'token',
+        scope: 'openid email profile',
+        include_granted_scopes: 'true',
+        state: stateToken
+      };
 
-    const queryString = Object.keys(params)
-      .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key]))
-      .join('&');
+      const queryString = Object.keys(params)
+        .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key]))
+        .join('&');
 
-    window.location.href = `${oauth2Endpoint}?${queryString}`;
-  });
+      window.location.href = `${oauth2Endpoint}?${queryString}`;
+    });
+  }
 
-  document.getElementById('exportBtn').addEventListener('click', ()=>{
-    const blob = new Blob([JSON.stringify(items, null, 2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'systems-desk-board.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  });
+  const exportBtn = document.getElementById('exportBtn');
+  if(exportBtn){
+    exportBtn.addEventListener('click', ()=>{
+      const blob = new Blob([JSON.stringify(items, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'systems-desk-board.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }
 
-  document.getElementById('importBtn').addEventListener('click', ()=>{
-    document.getElementById('jsonFileInput').click();
-  });
-  document.getElementById('jsonFileInput').addEventListener('change', (e)=>{
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt)=>{
-      try{
-        const parsed = JSON.parse(evt.target.result);
-        if(Array.isArray(parsed)){
-          items = parsed;
-          render();
-        } else {
-          alert('That file does not look like a valid board export.');
+  const importBtn = document.getElementById('importBtn');
+  const jsonFileInput = document.getElementById('jsonFileInput');
+  if(importBtn && jsonFileInput){
+    importBtn.addEventListener('click', ()=> jsonFileInput.click());
+    jsonFileInput.addEventListener('change', (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt)=>{
+        try{
+          const parsed = JSON.parse(evt.target.result);
+          if(Array.isArray(parsed)){
+            items = validateImportedItems(parsed);
+            render();
+          } else {
+            alert('That file does not look like a valid board export.');
+          }
+        }catch(err){
+          alert('Could not read that file: ' + err.message);
         }
-      }catch(err){
-        alert('Could not read that file: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  });
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    });
+  }
 
+  updateSessionUI();
   render();
 })();
 </script>
