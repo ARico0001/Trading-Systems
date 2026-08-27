@@ -779,8 +779,7 @@
     });
   }
 
-  // ---------- EXPORT / IMPORT ----------
-  const importNotesUrl = 'https://us-central1-ops-board-506600.cloudfunctions.net/importNotes';
+  // ---------- EXPORT / IMPORT / BIGQUERY SYNC ----------
   const exportNotesUrl = 'https://us-central1-ops-board-506600.cloudfunctions.net/exportNotes';
 
   function normalizeRemoteItem(item){
@@ -793,79 +792,120 @@
       alert('Please sign in with Google before syncing to BigQuery.');
       return;
     }
+    
+    try {
+      const response = await fetch(exportNotesUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Email': userEmail
+        },
+        body: JSON.stringify({ items: items })
+      });
 
-    const response = await fetch(importNotesUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-User-Email': userEmail
-      },
-      body: JSON.stringify(items.map(item=>({
-        id: item.id,
-        title: item.title,
-        content: item.notes,
-        category: item.category,
-        status: item.status,
-        created_at: new Date(item.created).toISOString()
-      })))
-    });
-    if(!response.ok) throw new Error(`Upload failed (${response.status})`);
+      if(!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      const result = await response.json();
+      alert('Board successfully synced to BigQuery!');
+    } catch (err) {
+      console.error('Failed to send to BigQuery:', err);
+      alert('Failed to sync to BigQuery. Check console for details.');
+    }
   }
 
-  async function loadNotesFromBigQuery(){
+  async function loadJsonFromBigQuery(){
     const userEmail = sessionStorage.getItem('user_email');
     if(!userEmail){
-      alert('Please sign in with Google before loading notes.');
+      alert('Please sign in with Google before loading from BigQuery.');
       return;
     }
 
-    const response = await fetch(`${exportNotesUrl}?email=${encodeURIComponent(userEmail)}`, {
-      headers: {
-        'X-User-Email': userEmail
+    try {
+      const response = await fetch(`${exportNotesUrl}?email=${encodeURIComponent(userEmail)}`, {
+        method: 'GET',
+        headers: {
+          'X-User-Email': userEmail
+        }
+      });
+
+      if(!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
       }
-    });
-    if(!response.ok) throw new Error(`Load failed (${response.status})`);
-    const payload = await response.json();
-    const remoteItems = Array.isArray(payload) ? payload : (payload.notes || []);
-    if(!Array.isArray(remoteItems)) throw new Error('The response is not a notes array.');
-    items = validateImportedItems(remoteItems);
-    render();
+
+      const data = await response.json();
+      const validated = validateImportedItems(data.items || data);
+      if(validated.length > 0){
+        items = validated;
+        render();
+        alert('Board successfully loaded from BigQuery!');
+      } else {
+        alert('No saved items found in BigQuery.');
+      }
+    } catch (err) {
+      console.error('Failed to load from BigQuery:', err);
+      alert('Failed to load from BigQuery. Check console for details.');
+    }
   }
 
-  const sendBtn = document.getElementById('sendToBigQueryBtn');
-  if(sendBtn){
-    sendBtn.addEventListener('click', async ()=>{
-      try{
-        await sendJsonToBigQuery();
-        alert('Board sent to BigQuery.');
-      }catch(err){
-        alert('Could not send the board to BigQuery: ' + err.message);
-      }
+  // Hook up export/import/BigQuery buttons
+  const exportBtn = document.getElementById('exportBtn');
+  if(exportBtn){
+    exportBtn.addEventListener('click', ()=>{
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(items, null, 2));
+      const dlAnchor = document.createElement('a');
+      dlAnchor.setAttribute("href", dataStr);
+      dlAnchor.setAttribute("download", "ops_desk_backup.json");
+      document.body.appendChild(dlAnchor);
+      dlAnchor.click();
+      dlAnchor.remove();
     });
   }
 
-  const loadBtn = document.getElementById('loadFromBigQueryBtn');
-  if(loadBtn){
-    loadBtn.addEventListener('click', async ()=>{
-      try{
-        await loadNotesFromBigQuery();
-        alert('Notes loaded from BigQuery.');
-      }catch(err){
-        alert('Could not load notes from BigQuery: ' + err.message);
-      }
+  const importBtn = document.getElementById('importBtn');
+  const jsonFileInput = document.getElementById('jsonFileInput');
+  if(importBtn && jsonFileInput){
+    importBtn.addEventListener('click', ()=> jsonFileInput.click());
+    jsonFileInput.addEventListener('change', (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt){
+        try {
+          const parsed = JSON.parse(evt.target.result);
+          const validated = validateImportedItems(parsed);
+          if(validated.length > 0){
+            items = validated;
+            render();
+            alert(`Successfully imported ${items.length} items.`);
+          } else {
+            alert('No valid items found in JSON file.');
+          }
+        } catch(err){
+          alert('Invalid JSON file.');
+        }
+        jsonFileInput.value = '';
+      };
+      reader.readAsText(file);
     });
   }
 
-  // ---------- GOOGLE LOGIN REDIRECT ----------
+  const sendToBigQueryBtn = document.getElementById('sendToBigQueryBtn');
+  if(sendToBigQueryBtn) sendToBigQueryBtn.addEventListener('click', sendJsonToBigQuery);
+
+  const loadFromBigQueryBtn = document.getElementById('loadFromBigQueryBtn');
+  if(loadFromBigQueryBtn) loadFromBigQueryBtn.addEventListener('click', loadJsonFromBigQuery);
+
   const loginBtn = document.getElementById('loginBtn');
   if(loginBtn){
-    loginBtn.addEventListener('click', () => {
+    loginBtn.addEventListener('click', ()=>{
       const oauth2Endpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
       const stateToken = sessionStorage.getItem('oauth_state');
       
       const params = {
         client_id: '743665673546-dei6iesm01lgghu3qeorji0aqeos4083.apps.googleusercontent.com',
-        redirect_uri: window.location.origin,
+        redirect_uri: window.location.origin + window.location.pathname,
         response_type: 'token',
         scope: 'openid email profile',
         include_granted_scopes: 'true',
@@ -880,49 +920,9 @@
     });
   }
 
-  const exportBtn = document.getElementById('exportBtn');
-  if(exportBtn){
-    exportBtn.addEventListener('click', ()=>{
-      const blob = new Blob([JSON.stringify(items, null, 2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'systems-desk-board.json';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    });
-  }
-
-  const importBtn = document.getElementById('importBtn');
-  const jsonFileInput = document.getElementById('jsonFileInput');
-  if(importBtn && jsonFileInput){
-    importBtn.addEventListener('click', ()=> jsonFileInput.click());
-    jsonFileInput.addEventListener('change', (e)=>{
-      const file = e.target.files[0];
-      if(!file) return;
-      const reader = new FileReader();
-      reader.onload = (evt)=>{
-        try{
-          const parsed = JSON.parse(evt.target.result);
-          if(Array.isArray(parsed)){
-            items = validateImportedItems(parsed);
-            render();
-          } else {
-            alert('That file does not look like a valid board export.');
-          }
-        }catch(err){
-          alert('Could not read that file: ' + err.message);
-        }
-      };
-      reader.readAsText(file);
-      e.target.value = "";
-    });
-  }
-
   updateSessionUI();
   render();
+
 })();
 </script>
 </body>
