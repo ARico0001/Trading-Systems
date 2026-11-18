@@ -6,7 +6,6 @@
 <title>Ops Log — Trading Systems Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --bg:#12181B;
@@ -313,7 +312,8 @@
       <p class="brand-sub">Track scan refinements, mechanical tool upgrades, and open questions for collaboration — in one working board.</p>
     </div>
     <div class="header-actions">
-      <button class="btn" id="loginBtn">Sign in with Google</button>
+      <div id="googleSignInButton"></div>
+      <button class="btn" id="loginBtn" hidden></button>
       <button class="btn" id="exportBtn">Export JSON</button>
       <button class="btn" id="importBtn">Import JSON</button>
       <input type="file" id="jsonFileInput" accept="application/json" hidden>
@@ -414,56 +414,37 @@
 (function(){
   "use strict";
 
-  // Security: Generate CSRF state token if not already in sessionStorage
-  if (!sessionStorage.getItem('oauth_state')) {
-    const array = new Uint8Array(16);
-    window.crypto.getRandomValues(array);
-    const token = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
-    sessionStorage.setItem('oauth_state', token);
-  }
-
-  // Handle Google OAuth callback via hash fragment
-  const hash = window.location.hash.substring(1);
-  const params = new URLSearchParams(hash);
-  const accessToken = params.get('access_token');
-  const returnedState = params.get('state');
-
-  if (accessToken) {
-    const savedState = sessionStorage.getItem('oauth_state');
-    if (returnedState !== savedState) {
-      console.error('CSRF state validation failed.');
-      alert('Security validation failed: Invalid OAuth state token.');
-    } else {
-      fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      })
-      .then(res => res.json())
-      .then(user => {
-        if (user.email) {
-          sessionStorage.setItem('user_email', user.email);
-          window.history.replaceState({}, document.title, window.location.pathname);
-          updateSessionUI();
-          alert(`Successfully signed in as ${safeString(user.email)}`);
-        }
-      })
-      .catch(err => console.error('Failed to fetch user info', err));
-    }
-  }
+  const GOOGLE_CLIENT_ID = '743665673546-dei6iesm01lgghu3qeorji0aqeos4083.apps.googleusercontent.com';
 
   // UI state update for sign in status
   function updateSessionUI() {
-    const userEmail = sessionStorage.getItem('user_email');
+    let userEmail = sessionStorage.getItem('user_email');
+    const idToken = sessionStorage.getItem('google_id_token');
     const loginBtn = document.getElementById('loginBtn');
+    const googleSignInButton = document.getElementById('googleSignInButton');
     const statusFooter = document.getElementById('userSessionStatus');
+    try {
+      const claims = idToken ? decodeIdToken(idToken) : null;
+      if (!claims || !Number.isFinite(claims.exp) || claims.exp * 1000 <= Date.now() ||
+          claims.email !== userEmail) {
+        throw new Error('Google ID token is missing, expired, or invalid.');
+      }
+    } catch (err) {
+      sessionStorage.removeItem('google_id_token');
+      sessionStorage.removeItem('user_email');
+      userEmail = null;
+    }
+
     if (loginBtn) {
+      loginBtn.hidden = !userEmail;
       if (userEmail) {
-        loginBtn.textContent = 'Signed in (' + userEmail.split('@')[0] + ')';
+        loginBtn.textContent = 'Sign out (' + userEmail.split('@')[0] + ')';
         loginBtn.title = userEmail;
       } else {
-        loginBtn.textContent = 'Sign in with Google';
         loginBtn.title = '';
       }
     }
+    if (googleSignInButton) googleSignInButton.hidden = Boolean(userEmail);
     if (statusFooter) {
       if (userEmail) {
         statusFooter.textContent = 'Signed in as ' + userEmail + ' — Sync active with BigQuery.';
@@ -471,6 +452,49 @@
         statusFooter.textContent = 'Data lives in this browser session only — use Export to save your board.';
       }
     }
+  }
+
+  function decodeIdToken(token) {
+    const payload = token.split('.')[1];
+    if (!payload) throw new Error('Malformed Google ID token.');
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')));
+  }
+
+  function handleGoogleCredential(response) {
+    try {
+      const claims = decodeIdToken(response.credential);
+      if (claims.aud !== GOOGLE_CLIENT_ID || claims.email_verified !== true ||
+          typeof claims.email !== 'string' || !Number.isFinite(claims.exp) ||
+          claims.exp * 1000 <= Date.now()) {
+        throw new Error('Google returned an invalid or expired identity token.');
+      }
+      sessionStorage.setItem('google_id_token', response.credential);
+      sessionStorage.setItem('user_email', claims.email);
+      updateSessionUI();
+    } catch (err) {
+      console.error('Google sign-in failed:', err);
+      alert('Google sign-in failed. Please try again.');
+    }
+  }
+
+  function initializeGoogleSignIn() {
+    const googleSignInButton = document.getElementById('googleSignInButton');
+    if (!window.google || !window.google.accounts || !window.google.accounts.id || !googleSignInButton) {
+      console.error('Google Identity Services did not initialize.');
+      return;
+    }
+    window.google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredential
+    });
+    window.google.accounts.id.renderButton(googleSignInButton, {
+      theme: 'filled_black',
+      size: 'medium',
+      text: 'signin_with',
+      shape: 'rectangular',
+      width: 180
+    });
   }
 
   const CATEGORY_LABEL = { scan:"Scan refinement", tool:"Tool optimization", collab:"Collaboration" };
@@ -519,6 +543,12 @@
   function validateImportedItems(arr) {
     if (!Array.isArray(arr)) return [];
     return arr.map(sanitizeItem).filter(item => item !== null && item.title !== '');
+  }
+
+  function getImportedItems(data) {
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === 'object' && Array.isArray(data.items)) return data.items;
+    return null;
   }
 
   // ---------- RENDER ----------
@@ -787,55 +817,57 @@
   }
 
   async function sendJsonToBigQuery(){
-    const userEmail = sessionStorage.getItem('user_email');
-    if(!userEmail){
+    const idToken = sessionStorage.getItem('google_id_token');
+    if(!idToken){
       alert('Please sign in with Google before syncing to BigQuery.');
       return;
     }
-    
+
     try {
       const response = await fetch(exportNotesUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-User-Email': userEmail
+          'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({ items: items })
       });
 
       if(!response.ok) {
-        throw new Error(`Server returned status ${response.status}`);
+        const detail = await response.text();
+        throw new Error(`Server returned status ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
       }
 
       const result = await response.json();
-      alert('Board successfully synced to BigQuery!');
+      alert(`Board successfully synced to BigQuery (${result.inserted} items).`);
     } catch (err) {
       console.error('Failed to send to BigQuery:', err);
-      alert('Failed to sync to BigQuery. Check console for details.');
+      alert(`Failed to sync to BigQuery: ${err.message}`);
     }
   }
 
   async function loadJsonFromBigQuery(){
-    const userEmail = sessionStorage.getItem('user_email');
-    if(!userEmail){
+    const idToken = sessionStorage.getItem('google_id_token');
+    if(!idToken){
       alert('Please sign in with Google before loading from BigQuery.');
       return;
     }
 
     try {
-      const response = await fetch(`${exportNotesUrl}?email=${encodeURIComponent(userEmail)}`, {
+      const response = await fetch(exportNotesUrl, {
         method: 'GET',
         headers: {
-          'X-User-Email': userEmail
+          'Authorization': `Bearer ${idToken}`
         }
       });
 
       if(!response.ok) {
-        throw new Error(`Server returned status ${response.status}`);
+        const detail = await response.text();
+        throw new Error(`Server returned status ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
       }
 
       const data = await response.json();
-      const validated = validateImportedItems(data.items || data);
+      const validated = validateImportedItems(getImportedItems(data) || []);
       if(validated.length > 0){
         items = validated;
         render();
@@ -853,13 +885,15 @@
   const exportBtn = document.getElementById('exportBtn');
   if(exportBtn){
     exportBtn.addEventListener('click', ()=>{
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(items, null, 2));
+      const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
       const dlAnchor = document.createElement('a');
-      dlAnchor.setAttribute("href", dataStr);
+      dlAnchor.href = url;
       dlAnchor.setAttribute("download", "ops_desk_backup.json");
       document.body.appendChild(dlAnchor);
       dlAnchor.click();
       dlAnchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
     });
   }
 
@@ -874,17 +908,21 @@
       reader.onload = function(evt){
         try {
           const parsed = JSON.parse(evt.target.result);
-          const validated = validateImportedItems(parsed);
-          if(validated.length > 0){
-            items = validated;
-            render();
-            alert(`Successfully imported ${items.length} items.`);
-          } else {
-            alert('No valid items found in JSON file.');
-          }
+          const importedItems = getImportedItems(parsed);
+          if(importedItems === null) throw new Error('Unsupported JSON format');
+          items = validateImportedItems(importedItems);
+          render();
+          alert(`Successfully imported ${items.length} items.`);
         } catch(err){
-          alert('Invalid JSON file.');
+          console.error('Failed to import JSON file:', err);
+          alert('Could not import this file. Choose a valid JSON backup.');
+        } finally {
+          jsonFileInput.value = '';
         }
+      };
+      reader.onerror = function(){
+        console.error('Failed to read JSON file:', reader.error);
+        alert('Could not read this file. Please try again.');
         jsonFileInput.value = '';
       };
       reader.readAsText(file);
@@ -898,30 +936,24 @@
   if(loadFromBigQueryBtn) loadFromBigQueryBtn.addEventListener('click', loadJsonFromBigQuery);
 
   const loginBtn = document.getElementById('loginBtn');
-  if(loginBtn){
-    loginBtn.addEventListener('click', ()=>{
-      const oauth2Endpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
-      const stateToken = sessionStorage.getItem('oauth_state');
-      
-      const params = {
-        client_id: '743665673546-dei6iesm01lgghu3qeorji0aqeos4083.apps.googleusercontent.com',
-        redirect_uri: window.location.origin + window.location.pathname,
-        response_type: 'token',
-        scope: 'openid email profile',
-        include_granted_scopes: 'true',
-        state: stateToken
-      };
-
-      const queryString = Object.keys(params)
-        .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key]))
-        .join('&');
-
-      window.location.href = `${oauth2Endpoint}?${queryString}`;
-    });
-  }
+  if(loginBtn) loginBtn.addEventListener('click', ()=>{
+    sessionStorage.removeItem('google_id_token');
+    sessionStorage.removeItem('user_email');
+    updateSessionUI();
+  });
 
   updateSessionUI();
   render();
+
+  const googleIdentityScript = document.createElement('script');
+  googleIdentityScript.src = 'https://accounts.google.com/gsi/client';
+  googleIdentityScript.async = true;
+  googleIdentityScript.onload = initializeGoogleSignIn;
+  googleIdentityScript.onerror = ()=>{
+    console.error('Failed to load Google Identity Services.');
+    alert('Google sign-in is unavailable. Please reload and try again.');
+  };
+  document.head.appendChild(googleIdentityScript);
 
 })();
 </script>
